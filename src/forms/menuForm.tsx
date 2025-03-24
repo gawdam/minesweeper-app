@@ -72,6 +72,7 @@ export const createForm = Devvit.createForm(
     await redis.set(`${post.id}_gridSize`, JSON.stringify(gridSize));
     const minePosition = Math.floor(Math.random() * (gridSize * gridSize));
 
+
     // Store it in Redis with a unique key
     await redis.set(`${post.id}_minePosition`, minePosition.toString());
 

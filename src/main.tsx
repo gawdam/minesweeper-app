@@ -11,9 +11,11 @@ interface GameState {
   size: number;
   minePosition: number;
   tileStates: (boolean | null)[];
+  tileVotes: number[];
   score: number;
   gameOver: boolean;
   gameWon: boolean;
+  theme: string; // Add theme to game state
 }
 
 // Add a menu item to the subreddit menu for instantiating the new experience post
@@ -37,8 +39,7 @@ async (_event, { ui }) => {
   console.log("Confirmation form submitted");
   console.log(_event.values.cancelled);
   return _event.values.cancelled;
-}
-);
+});
 
 // Add a post type definition
 Devvit.addCustomPostType({
@@ -50,8 +51,8 @@ Devvit.addCustomPostType({
     const userGameStateKey = userId ? `${postId}_game_${userId}` : null;
     
     // Use useState with an async initializer to fetch the grid size and game state
-    const [gameData] = useState<{ size: number;minePosition:number; tileStates: boolean[]; score:number; } | null>(async () => {
-      const formGridSize = await redis.get(`${postId}_gridSize`);
+    const [gameData] = useState<{ size: number;minePosition:number; tileStates: boolean[]; tileVotes: number[]; score:number; theme:string; }  | null>(async () => {
+      const formGridSize = await redis.get(`u${postId}_gridSize`);
       const minePosition = await redis.get(`${postId}_minePosition`).then((value) => parseInt(value!));
 
       const size = formGridSize ? parseInt(formGridSize) : 3;
@@ -68,34 +69,84 @@ Devvit.addCustomPostType({
       
       // No saved state, initialize a new game
       console.log("Creating new game state");
-
       
       return {
         size,
         minePosition,
         tileStates: Array(size * size).fill(null), // null = untouched, true = safe, false = mine
+        tileVotes: Array(size * size).fill(0),
         score: 0,
         gameOver: false,
-        gameWon: false
+        gameWon: false,
+        theme: "dark" // Default theme
       };
     });
     
     // Create states from game data
     const [tileStates, setTileStates] = useState(gameData ? gameData.tileStates : []);
+    const [tileVotes, setTileVotes] = useState(gameData ? gameData.tileVotes : []);
     const [score, setScore] = useState(gameData ? gameData.score : 0);
     const [gameOver, setGameOver] = useState(false);
     const [gameWon, setGameWon] = useState(false);
+    const [theme, setTheme] = useState(gameData ? gameData.theme : "dark");
+    
+    // Theme colors
+    const themeColors = {
+      dark: {
+        background: "#121212",
+        tile: {
+          untouched: "#2C2C2C",
+          safe: "#1E4620", // Dark green
+          mine: "#6E1B1B"  // Dark red
+        },
+        text: "#FFFFFF",
+        border: "#3D3D3D",
+        button: "#383838",
+        buttonText: "#FFFFFF",
+        iconColor: "#FF4500" // Reddit's orangered color
+      },
+      light: {
+        background: "#FFFFFF",
+        tile: {
+          untouched: "#E0E0E0",
+          safe: "#A5D6A7", // Light green
+          mine: "#FFCDD2"  // Light red
+        },
+        text: "#121212",
+        border: "#CCCCCC",
+        button: "#F5F5F5",
+        buttonText: "#121212",
+        iconColor: "#FF4500" // Reddit's orangered color
+      }
+    };
+    
+    // Get current theme colors
+    const colors = theme === "dark" ? themeColors.dark : themeColors.light;
+    
+    // Toggle theme function
+    const toggleTheme = () => {
+      const newTheme = theme === "dark" ? "light" : "dark";
+      setTheme(newTheme);
+      
+      if (gameData && userGameStateKey) {
+        const updatedGameData = { ...gameData, theme: newTheme };
+        redis.set(userGameStateKey, JSON.stringify(updatedGameData));
+        console.log(`Theme switched to ${newTheme}`);
+      }
+    };
     
     // Function to save game state to Redis
-    const saveGameState = async (updatedTileStates: boolean[], updatedScore: number, isGameOver: boolean, isGameWon: boolean) => {
+    const saveGameState = async (updatedTileStates: boolean[], updatedTileVotes: number[], updatedScore: number, isGameOver: boolean, isGameWon: boolean) => {
       if (!gameData || !userGameStateKey) return;
       
       const stateToSave: GameState = {
         ...gameData,
         tileStates: updatedTileStates,
+        tileVotes: updatedTileVotes,
         score: updatedScore,
         gameOver: isGameOver,
-        gameWon: isGameWon
+        gameWon: isGameWon,
+        theme: theme
       };
       
       redis.set(userGameStateKey, JSON.stringify(stateToSave));
@@ -118,15 +169,19 @@ Devvit.addCustomPostType({
         setGameOver(true);
         
         // Save updated state with the new arrays
-        saveGameState(newTileStates, score, true, false);
+        saveGameState(newTileStates, tileVotes, score, true, false);
       } else {
         // Safe tile
         const newTileStates = [...tileStates];
+        const newTileVotes = [...tileVotes];
+
         newTileStates[index] = true; // true = safe
+        newTileVotes[index] += 1;
         
         const newScore = score + 2;
         
         setTileStates(newTileStates);
+        setTileVotes(newTileVotes);
         setScore(newScore);
         
         // Check if all safe tiles are revealed (win condition)
@@ -139,16 +194,13 @@ Devvit.addCustomPostType({
         }
         
         // Save updated state with the new arrays
-        saveGameState(newTileStates, newScore, false, isWon);
+        saveGameState(newTileStates, newTileVotes, newScore, false, isWon);
       }
     };
 
-    
-    const promptDevilOrAngel =  () => {
+    const promptDevilOrAngel = () => {
       console.log("Prompting devil or angel");
       ui.showForm(confirmationForm);
-      
-
     };
     
     // Reset game function
@@ -161,6 +213,8 @@ Devvit.addCustomPostType({
       // Reset states
       const newTileStates = Array(gameData.size * gameData.size).fill(null);
       setTileStates(newTileStates);
+      const newTileVotes = Array(gameData.size * gameData.size).fill(0);
+      setTileVotes(newTileVotes);
       setScore(0);
       setGameOver(false);
       setGameWon(false);
@@ -172,10 +226,12 @@ Devvit.addCustomPostType({
       const stateToSave: GameState = {
         ...gameData,
         tileStates: newTileStates,
+        tileVotes: newTileVotes,
         score: 0,
         gameOver: false,
         gameWon: false,
-        minePosition: newMinePosition
+        minePosition: newMinePosition,
+        theme: theme
       };
       
       redis.set(userGameStateKey, JSON.stringify(stateToSave));
@@ -184,8 +240,8 @@ Devvit.addCustomPostType({
     
     // If gameData is not yet loaded, show loading state
     if (!gameData) {
-      return <vstack alignment="center middle" height="100%" width="100%">
-        <text>Loading...</text>
+      return <vstack alignment="center middle" height="100%" width="100%" backgroundColor={colors.background}>
+        <text color={colors.text}>Loading...</text>
       </vstack>;
     }
     
@@ -200,23 +256,67 @@ Devvit.addCustomPostType({
         for (let j = 0; j < size; j++) {
           const index = i * size + j;
           
-          // Determine tile color
-          let tileColor = "grey"; // Default untouched
+          // Determine tile color based on state and theme
+          let tileColor;
           if (tileStates[index] === true) {
-            tileColor = "green"; // Safe tile
+            tileColor = colors.tile.safe; // Safe tile
           } else if (tileStates[index] === false) {
-            tileColor = "red"; // Mine
+            tileColor = colors.tile.mine; // Mine
+          } else {
+            tileColor = colors.tile.untouched; // Untouched
           }
           
           tiles.push(
-            <hstack 
+            <zstack 
               key={`tile-${index}`}
               width="60px" 
-              height="60px" 
-              backgroundColor={tileColor}
-              borderColor="white"
+              height="60px"
+              borderColor={colors.border}
               onPress={() => handleTilePress(index)}
-            />
+              alignment="center middle"
+            >
+              {/* Background image */}
+              <image 
+                url="tile.jpg" 
+                imageWidth={60} 
+                imageHeight={60} 
+                width="100%" 
+                height="100%" 
+                resizeMode="cover"
+              />
+              
+              {/* Colored overlay for visibility */}
+              {/* <hstack 
+                width="100%" 
+                height="100%" 
+                backgroundColor={tileColor} 
+             
+                alignment="center middle"
+              /> */}
+              
+              {/* Content */}
+              <vstack alignment="center">
+                <hstack alignment="center middle" gap="small">
+                    <image 
+                    url="explosion.png" 
+                    imageWidth={12} 
+                    imageHeight={12} 
+                    width="10%" 
+                    height="10%" 
+                    resizeMode="cover"
+                  />
+                  <text color={colors.text} weight="bold">
+                    {tileVotes[index]}
+                  </text>
+                </hstack>
+                <text color={colors.text} size="xsmall">
+                  mine
+                </text>
+                <text color={colors.text} size="xsmall">
+                  reports
+                </text>
+              </vstack>
+            </zstack>
           );
         }
         
@@ -229,42 +329,52 @@ Devvit.addCustomPostType({
       
       return rows;
     };
-
-    // Fixed promptDevilOrAngel function - now using the ui parameter passed into render
-
     
     // Render the game status
     const renderStatus = () => {
       if (gameOver) {
-        return <text alignment="center" color="white" weight="bold">Game Over! You hit a mine.</text>;
+        return <text alignment="center" color={colors.text} weight="bold">Game Over! You hit a mine.</text>;
       } else if (gameWon) {
-        return <text alignment="center" color="white" weight="bold">You Win! All safe tiles revealed.</text>;
+        return <text alignment="center" color={colors.text} weight="bold">You Win! All safe tiles revealed.</text>;
       } else {
-        return <text alignment="center" color="white" weight="bold">Score: {score}</text>;
+        return <text alignment="center" color={colors.text} weight="bold">Score: {score}</text>;
       }
     };
   
     // For non-logged in users, show a message
     if (!userGameStateKey) {
       return (
-        <vstack height="100%" width="100%" gap="medium" alignment="center middle">
-          <text>Please log in to play and save your game progress.</text>
+        <vstack height="100%" width="100%" gap="medium" alignment="center middle" backgroundColor={colors.background}>
+          <text color={colors.text}>Please log in to play and save your game progress.</text>
         </vstack>
       );
     }
   
     return (
-      <vstack height="100%" width="100%" gap="medium" alignment="center middle">
+      <vstack height="100%" width="100%" gap="medium" alignment="center middle" backgroundColor={colors.background}>
         <vstack gap="large">
           {renderStatus()}
           <vstack height="80%" width="100%" gap="medium">
             {renderGrid()}
           </vstack>
-          {(gameOver || gameWon) && 
-            <button onPress={promptDevilOrAngel}>
-              Play Again
+          <hstack gap="medium">
+            {(gameOver || gameWon) && 
+              <button 
+                onPress={promptDevilOrAngel}
+                appearance="primary"
+                textColor={colors.buttonText}
+              >
+                Play Again
+              </button>
+            }
+            <button 
+              onPress={toggleTheme}
+              appearance="primary"
+              textColor={colors.buttonText}
+            >
+              Switch to {theme === "dark" ? "Light" : "Dark"} Theme
             </button>
-          }
+          </hstack>
         </vstack>
       </vstack>
     );
