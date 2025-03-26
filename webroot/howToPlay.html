@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>How To Play - Minesweeper</title>
+    <link rel="stylesheet" href="/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div class="how-to-play">
+      <div class="page active" id="during-game">
+        <h2>Play the Game</h2>
+        <div class="steps-container">
+          <div class="step">
+            <h3>The Grid Setup</h3>
+            <p>One mine is hidden in a 3x3 grid.</p>
+            <div class="step-illustration">
+              <div class="grid-example">
+                <div class="grid-cell">?</div>
+                <div class="grid-cell">?</div>
+                <div class="grid-cell">?</div>
+                <div class="grid-cell">?</div>
+                <div class="grid-cell mine">💣</div>
+                <div class="grid-cell">?</div>
+                <div class="grid-cell">?</div>
+                <div class="grid-cell">?</div>
+                <div class="grid-cell">?</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="step">
+            <h3>Scoring Points</h3>
+            <p>Get 5 points if you complete the board. Game ends if you step on a mine!</p>
+            <div class="step-illustration">
+              <div class="grid-example">
+                <div class="grid-cell safe">✓</div>
+                <div class="grid-cell safe">✓</div>
+                <div class="grid-cell safe">✓</div>
+                <div class="grid-cell safe">✓</div>
+                <div class="grid-cell">?</div>
+                <div class="grid-cell safe">✓</div>
+                <div class="grid-cell safe">✓</div>
+                <div class="grid-cell safe">✓</div>
+                <div class="grid-cell safe">✓</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="step">
+            <h3>Mine Indicators</h3>
+            <p>Each tile shows the number of redditors who have reported a mine in that tile.</p>
+            <div class="step-illustration">
+              <div class="grid-example">
+                <div class="grid-cell">1</div>
+                <div class="grid-cell">1</div>
+                <div class="grid-cell">0</div>
+                <div class="grid-cell">1</div>
+                <div class="grid-cell mine">5</div>
+                <div class="grid-cell">1</div>
+                <div class="grid-cell">0</div>
+                <div class="grid-cell">1</div>
+                <div class="grid-cell">1</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page active" id="after-game">
+        <h2>Choose your faction!</h2>
+        <div class="steps-container">
+          <div class="step">
+            <h3>Choose your team</h3>
+            <p>Take your points to the angels or the devils!</p>
+            <div class="step-illustration">
+              <div class="team-choice">
+                <div class="team angel">👼 Angels</div>
+                <div class="vs">VS</div>
+                <div class="team devil">😈 Devils</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="step">
+            <h3>Guiding Angel</h3>
+            <p>Place the flag on the actual mine location to become a Guiding Angel (+5 points per completion)</p>
+            <div class="step-illustration">
+              <div class="grid-example">
+                <div class="grid-cell">✓</div>
+                <div class="grid-cell">✓</div>
+                <div class="grid-cell">✓</div>
+                <div class="grid-cell">✓</div>
+                <div class="grid-cell mine flag">🚩</div>
+                <div class="grid-cell">✓</div>
+                <div class="grid-cell">✓</div>
+                <div class="grid-cell">✓</div>
+                <div class="grid-cell">✓</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="step">
+            <h3>Devil of Deceit</h3>
+            <p>Place the flag elsewhere to become a Devil of Deceit (+2 points per deception)</p>
+            <div class="step-illustration">
+              <div class="grid-example">
+                <div class="grid-cell">✓</div>
+                <div class="grid-cell flag">🚩</div>
+                <div class="grid-cell">✓</div>
+                <div class="grid-cell">✓</div>
+                <div class="grid-cell mine">💣</div>
+                <div class="grid-cell">✓</div>
+                <div class="grid-cell">✓</div>
+                <div class="grid-cell">✓</div>
+                <div class="grid-cell">✓</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>

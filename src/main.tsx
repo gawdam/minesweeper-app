@@ -1,21 +1,29 @@
 // Learn more at developers.reddit.com/docs
-import { Devvit, useState } from '@devvit/public-api';
+import { Devvit, useState, useForm, useWebView} from '@devvit/public-api';
 import { createForm } from './forms/menuForm.js';
+import { ResultsPage } from './views/results.js';
 
 Devvit.configure({
   redditAPI: true,
+  realtime: true,
+  redis: true,
 });
 
 // Game state interface for type safety
-interface GameState {
+type GameState = {
   size: number;
   minePosition: number;
-  tileStates: (boolean | null)[];
+  tileStates: (boolean)[];
   tileVotes: number[];
-  score: number;
+  userFaction: string;
   gameOver: boolean;
   gameWon: boolean;
   theme: string; // Add theme to game state
+  hasVoted: boolean;
+  angelScore: number;
+  angelCount:number;
+  devilScore: number;
+  devilCount:number;
 }
 
 // Add a menu item to the subreddit menu for instantiating the new experience post
@@ -27,36 +35,55 @@ Devvit.addMenuItem({
   },
 });
 
-// Define the confirmation form
-const confirmationForm = Devvit.createForm({
-  title: 'Confirmation',
-  description: 'Please make a selection:',
-  acceptLabel: 'Yes',
-  cancelLabel: 'No',
-  fields: [],
-}, 
-async (_event, { ui }) => {
-  console.log("Confirmation form submitted");
-  console.log(_event.values.cancelled);
-  return _event.values.cancelled;
-});
+// Devvit.addCustomPostType({
+//   name: 'Game with Leaderboard',
+//   render: ({redis}) => {
+//     // Simple routing
+//     if (path === '/leaderboard') {
+//       return <LeaderboardScreen />;
+//     } else {
+//       return <GameScreen context={context} />;
+//     }
+//   },
+// });
 
 // Add a post type definition
 Devvit.addCustomPostType({
   name: 'Experience Post',
-  height: 'regular',
+  height: 'tall',
   
-  render: ({redis, postId, userId, ui}) => {
+  render: ({redis, postId, userId, ui, assets}) => {
+
+
+    const { mount } = useWebView({
+      url: 'howToPlay.html',
+      onMessage: (message) => {
+        console.log(`Received message: ${message}`);
+      }
+    });
+
+    
+
+
     // Get a unique key for this user's game state
     const userGameStateKey = userId ? `${postId}_game_${userId}` : null;
+    const GameVotesKey =  `${postId}_votes`;
     
     // Use useState with an async initializer to fetch the grid size and game state
-    const [gameData] = useState<{ size: number;minePosition:number; tileStates: boolean[]; tileVotes: number[]; score:number; theme:string; }  | null>(async () => {
+    const [gameData] = useState<GameState>(async () => {
       const formGridSize = await redis.get(`u${postId}_gridSize`);
       const minePosition = await redis.get(`${postId}_minePosition`).then((value) => parseInt(value!));
 
       const size = formGridSize ? parseInt(formGridSize) : 3;
+      const voteCounts = await redis.get(GameVotesKey).then((value) => value ? JSON.parse(value) : Array(size * size).fill(0));
+      const angelScore = await redis.get(`score_${postId}_angel`).then((value) => value ? parseInt(value) : 0);
+      const angelCount = await redis.get(`count_${postId}_angel`).then((value) => value ? parseInt(value) : 0);
+      const devilScore = await redis.get(`score_${postId}_devil`).then((value) => value ? parseInt(value) : 0);
+      const devilCount = await redis.get(`count_${postId}_devil`).then((value) => value ? parseInt(value) : 0);
+
       console.log(`Loaded gridSize: ${size}`);
+      console.log(assets.getURL("explosion.png"));
+
       
       // Try to load existing game state for this user
       if (userGameStateKey) {
@@ -74,37 +101,117 @@ Devvit.addCustomPostType({
         size,
         minePosition,
         tileStates: Array(size * size).fill(null), // null = untouched, true = safe, false = mine
-        tileVotes: Array(size * size).fill(0),
-        score: 0,
+        tileVotes: voteCounts ? voteCounts : Array(size * size).fill(0),
+        userFaction: '-',
         gameOver: false,
         gameWon: false,
-        theme: "dark" // Default theme
+        theme: "dark", // Default theme
+        hasVoted: false,
+        angelScore:angelScore,
+        angelCount:angelCount,
+        devilScore:devilScore,
+        devilCount:devilCount,
       };
     });
     
     // Create states from game data
     const [tileStates, setTileStates] = useState(gameData ? gameData.tileStates : []);
-    const [tileVotes, setTileVotes] = useState(gameData ? gameData.tileVotes : []);
-    const [score, setScore] = useState(gameData ? gameData.score : 0);
+    const [tileVotes, setTileVotes] = useState(gameData ? gameData.tileVotes : [])
+    const [userFaction, setUserFaction] = useState(gameData ? gameData.userFaction : '-');
     const [gameOver, setGameOver] = useState(false);
     const [gameWon, setGameWon] = useState(false);
     const [theme, setTheme] = useState(gameData ? gameData.theme : "dark");
+    const [voteIndex, setVoteIndex] = useState(-1);
+    const [hasVoted, setHasVoted] = useState(gameData.hasVoted);
+
+    // Modify the useState initializer to always save initial scores
+    const [angelScore, setAngelScore] = useState(async () => {
+      const score = await redis.get(`score_${postId}_angel`);
+      const parsedScore = score ? parseInt(score) : 0;
+      // Save the initial score if it doesn't exist
+      if (!score) {
+        await redis.set(`score_${postId}_angel`, `${parsedScore}`);
+      }
+      return parsedScore;
+    });
     
+    // Similar modification for other score variables
+    const [angelCount, setAngelCount] = useState(async () => {
+      const count = await redis.get(`count_${postId}_angel`);
+      const parsedCount = count ? parseInt(count) : 0;
+      if (!count) {
+        await redis.set(`count_${postId}_angel`, `${parsedCount}`);
+      }
+      return parsedCount;
+    });
+    
+    // In your state update functions, always save to Redis
+    const updateAngelScore = async (newScore: number) => {
+      setAngelScore(newScore);
+      await redis.set(`score_${postId}_angel`, `${newScore}`);
+    };
+    
+    const updateAngelCount = async (newCount: number) => {
+      setAngelCount(newCount);
+      await redis.set(`count_${postId}_angel`, `${newCount}`);
+    };
+    const [devilScore, setDevilScore] = useState(async () => {
+      const score = await redis.get(`score_${postId}_devil`);
+      const parsedScore = score ? parseInt(score) : 0;
+      // Save the initial score if it doesn't exist
+      if (!score) {
+        await redis.set(`score_${postId}_devil`, `${parsedScore}`);
+      }
+      return parsedScore;
+    });
+    const [devilCount, setDevilCount] = useState(async () => {
+      const count = await redis.get(`count_${postId}_devil`);
+      const parsedCount = count ? parseInt(count) : 0;
+      if (!count) {
+        await redis.set(`count_${postId}_devil`, `${parsedCount}`);
+      }
+      return parsedCount;
+    });
+
+    const updateDevilScore = async (newScore: number) => {
+      setDevilScore(newScore);
+      await redis.set(`score_${postId}_devil`, `${newScore}`);
+    };
+    
+    const updateDevilCount = async (newCount: number) => {
+      setDevilCount(newCount);
+      await redis.set(`count_${postId}_devil`, `${newCount}`);
+    };
+
+    console.log("hasVoted1", hasVoted);
+
+    console.log("Scores", {angelCount, angelScore, devilCount, devilScore, userFaction});
+
+    if(hasVoted){
+     return <ResultsPage 
+     angelCount={angelCount}
+     angelScore={angelScore}
+     devilCount={devilCount}
+     devilScore={devilScore}
+     userFaction={userFaction}
+   />; 
+    }
     // Theme colors
     const themeColors = {
       dark: {
-        background: "#121212",
+        background: "#0F1020", // Deep, rich midnight blue
         tile: {
-          untouched: "#2C2C2C",
-          safe: "#1E4620", // Dark green
-          mine: "#6E1B1B"  // Dark red
+          untouched: "#5C5C5C", // Deep slate blue for untouched tiles
+          safe: "#2ECC71", // Bright, vibrant emerald green - signifying safety and life
+          mine: "#E74C3C" // Bright, alarming red - indicating clear danger
         },
-        text: "#FFFFFF",
-        border: "#3D3D3D",
-        button: "#383838",
-        buttonText: "#FFFFFF",
-        iconColor: "#FF4500" // Reddit's orangered color
+        text: "#FAF9F6", // Soft, slightly off-white for better readability
+        border: "#2C3E50", // Muted dark blue-gray for borders
+        button: "#2C3E50", // Sophisticated dark blue-gray for buttons
+        buttonText: "#E0E6ED", // Matching soft text color
+        iconColor: "#FF6B6B" // Softer, more vibrant coral-red
       },
+  
       light: {
         background: "#FFFFFF",
         tile: {
@@ -113,7 +220,7 @@ Devvit.addCustomPostType({
           mine: "#FFCDD2"  // Light red
         },
         text: "#121212",
-        border: "#CCCCCC",
+        border: "#000000",
         button: "#F5F5F5",
         buttonText: "#121212",
         iconColor: "#FF4500" // Reddit's orangered color
@@ -123,66 +230,74 @@ Devvit.addCustomPostType({
     // Get current theme colors
     const colors = theme === "dark" ? themeColors.dark : themeColors.light;
     
-    // Toggle theme function
-    const toggleTheme = () => {
-      const newTheme = theme === "dark" ? "light" : "dark";
-      setTheme(newTheme);
-      
-      if (gameData && userGameStateKey) {
-        const updatedGameData = { ...gameData, theme: newTheme };
-        redis.set(userGameStateKey, JSON.stringify(updatedGameData));
-        console.log(`Theme switched to ${newTheme}`);
-      }
-    };
-    
     // Function to save game state to Redis
-    const saveGameState = async (updatedTileStates: boolean[], updatedTileVotes: number[], updatedScore: number, isGameOver: boolean, isGameWon: boolean) => {
+    const saveGameState = async (updatedTileStates: boolean[], updatedTileVotes: number[], updatedFaction: string, isGameOver: boolean, isGameWon: boolean, hasVoted:boolean, angelCount:number,angelScore:number,devilCount:number,devilScore:number) => {
       if (!gameData || !userGameStateKey) return;
       
       const stateToSave: GameState = {
         ...gameData,
         tileStates: updatedTileStates,
         tileVotes: updatedTileVotes,
-        score: updatedScore,
+        userFaction: updatedFaction,
         gameOver: isGameOver,
         gameWon: isGameWon,
-        theme: theme
+        theme: theme,
+        hasVoted: hasVoted,
+        angelScore: angelScore,
+        angelCount: angelCount,
+        devilScore: devilScore,
+        devilCount: devilCount,
+
       };
       
       redis.set(userGameStateKey, JSON.stringify(stateToSave));
       console.log("Game state saved");
     };
     
+    const refreshTileVotes = async () => {
+      // First try to use gameData if available
+      if (gameData && gameData.tileVotes) {
+        return gameData.tileVotes;
+      }
+      // Otherwise fetch from Redis
+      const countString = await redis.get(GameVotesKey);
+      console.log(`Loaded votes: ${countString}`);
+      const voteCounts = countString ? JSON.parse(countString) : []
+      setTileVotes(voteCounts);
+      return voteCounts;
+    };
+    
     // Function to handle tile press
     const handleTilePress = async (index: number) => {
-      if (!gameData || gameOver || gameWon || tileStates[index] !== null) {
+      if (!gameData) {
         return; // Ignore if game is over or tile already revealed
+      }
+      if (gameOver || gameWon) {
+        setVoteIndex(index);
       }
       
       // Check if clicked on mine
-      if (index === gameData.minePosition) {
+      else if (index === gameData.minePosition) {
         // Create new state arrays to pass to saveGameState
         const newTileStates = [...tileStates];
         newTileStates[index] = false; // false = mine
         
         setTileStates(newTileStates);
-        setGameOver(true);
+
+          setGameOver(true);
+
         
         // Save updated state with the new arrays
-        saveGameState(newTileStates, tileVotes, score, true, false);
+        saveGameState(newTileStates, tileVotes, '-', true, false,false,angelCount,angelScore,devilCount,devilScore);  
       } else {
         // Safe tile
         const newTileStates = [...tileStates];
-        const newTileVotes = [...tileVotes];
 
         newTileStates[index] = true; // true = safe
-        newTileVotes[index] += 1;
         
-        const newScore = score + 2;
+
         
         setTileStates(newTileStates);
-        setTileVotes(newTileVotes);
-        setScore(newScore);
         
         // Check if all safe tiles are revealed (win condition)
         const safeTilesCount = gameData.size * gameData.size - 1; // All tiles except the mine
@@ -190,54 +305,14 @@ Devvit.addCustomPostType({
         
         const isWon = revealedSafeTiles >= safeTilesCount;
         if (isWon) {
-          setGameWon(true);
+            setGameWon(true);
         }
         
         // Save updated state with the new arrays
-        saveGameState(newTileStates, newTileVotes, newScore, false, isWon);
+        // saveGameState(newTileStates, newTileVotes, newScore, false, isWon);
       }
     };
-
-    const promptDevilOrAngel = () => {
-      console.log("Prompting devil or angel");
-      ui.showForm(confirmationForm);
-    };
-    
-    // Reset game function
-    const resetGame = async () => {
-      if (!gameData || !userGameStateKey) return;
-      
-      // Generate new mine position
-      const newMinePosition = Math.floor(Math.random() * (gameData.size * gameData.size));
-      
-      // Reset states
-      const newTileStates = Array(gameData.size * gameData.size).fill(null);
-      setTileStates(newTileStates);
-      const newTileVotes = Array(gameData.size * gameData.size).fill(0);
-      setTileVotes(newTileVotes);
-      setScore(0);
-      setGameOver(false);
-      setGameWon(false);
-      
-      // Update gameData mine position
-      gameData.minePosition = newMinePosition;
-      
-      // Save reset state
-      const stateToSave: GameState = {
-        ...gameData,
-        tileStates: newTileStates,
-        tileVotes: newTileVotes,
-        score: 0,
-        gameOver: false,
-        gameWon: false,
-        minePosition: newMinePosition,
-        theme: theme
-      };
-      
-      redis.set(userGameStateKey, JSON.stringify(stateToSave));
-      console.log("Game reset and saved");
-    };
-    
+        
     // If gameData is not yet loaded, show loading state
     if (!gameData) {
       return <vstack alignment="center middle" height="100%" width="100%" backgroundColor={colors.background}>
@@ -245,8 +320,39 @@ Devvit.addCustomPostType({
       </vstack>;
     }
     
+
+
+const saveAndShowLeaderboard = async () => {
+  tileVotes[voteIndex] += 1;
+
+  if(voteIndex === gameData.minePosition){
+    const newAngelScore = angelScore + (gameWon ? 5 : 0);
+    const newDevilScore = devilScore + (gameWon ? 0 : 2);
+    const newAngelCount = angelCount + 1;
+
+    await updateAngelScore(newAngelScore);
+    await updateAngelCount(newAngelCount);
+    await updateDevilScore(newDevilScore);
+    
+    setUserFaction('angel');
+  } else {
+    const newDevilScore = devilScore + (gameWon ? 5 : 2);
+    const newDevilCount = devilCount + 1;
+
+    await updateDevilScore(newDevilScore);
+    await updateDevilCount(newDevilCount);
+    
+    setUserFaction('devil');
+  }
+
+  saveGameState(tileStates, tileVotes, userFaction, gameOver, gameWon, true, angelCount, angelScore, devilCount, devilScore);
+  await redis.set(GameVotesKey, JSON.stringify(tileVotes));
+  setHasVoted(true);
+};
+    
     // Create the grid
     const renderGrid = () => {
+      refreshTileVotes();
       const rows = [];
       const size = gameData.size;
       
@@ -256,15 +362,16 @@ Devvit.addCustomPostType({
         for (let j = 0; j < size; j++) {
           const index = i * size + j;
           
-          // Determine tile color based on state and theme
-          let tileColor;
-          if (tileStates[index] === true) {
-            tileColor = colors.tile.safe; // Safe tile
-          } else if (tileStates[index] === false) {
-            tileColor = colors.tile.mine; // Mine
-          } else {
-            tileColor = colors.tile.untouched; // Untouched
-          }
+          // Always use untouched color if game is over
+          const tileColor = (gameOver || gameWon) 
+            ? colors.tile.untouched 
+            : (
+                tileStates[index] === true 
+                  ? colors.tile.safe 
+                  : (tileStates[index] === false 
+                      ? colors.tile.mine 
+                      : colors.tile.untouched)
+              );
           
           tiles.push(
             <zstack 
@@ -272,50 +379,53 @@ Devvit.addCustomPostType({
               width="60px" 
               height="60px"
               borderColor={colors.border}
-              onPress={() => handleTilePress(index)}
+              onPress={async () => await handleTilePress(index)}
               alignment="center middle"
+              cornerRadius='small'
             >
-              {/* Background image */}
-              <image 
-                url="tile.jpg" 
-                imageWidth={60} 
-                imageHeight={60} 
-                width="100%" 
-                height="100%" 
-                resizeMode="cover"
-              />
-              
-              {/* Colored overlay for visibility */}
-              {/* <hstack 
+              {/* Colored overlay */}
+              <hstack 
                 width="100%" 
                 height="100%" 
                 backgroundColor={tileColor} 
-             
                 alignment="center middle"
-              /> */}
+              />
               
               {/* Content */}
-              <vstack alignment="center">
+              <vstack alignment="center" cornerRadius='small'>
+                {/* Always show vote count */}
                 <hstack alignment="center middle" gap="small">
-                    <image 
-                    url="explosion.png" 
-                    imageWidth={12} 
-                    imageHeight={12} 
-                    width="10%" 
-                    height="10%" 
-                    resizeMode="cover"
-                  />
-                  <text color={colors.text} weight="bold">
-                    {tileVotes[index]}
+                  <text color={colors.text} weight="bold" size="xlarge">
+                    {voteIndex === index ? tileVotes[index] + 1 : tileVotes[index]}
                   </text>
+                  
+                  {/* Red flag only on the specific tile that was pressed during game over */}
+                  {(!gameOver && !gameWon) && (
+                    <image 
+                      url="redflag.png"
+                      imageWidth={20} 
+                      imageHeight={20} 
+                      resizeMode="cover"
+                    />
+                  )}
+                  {(gameOver||gameWon) && index===gameData.minePosition && (
+                    <image 
+                      url="bomb.png"
+                      imageWidth={20} 
+                      imageHeight={20} 
+                      resizeMode="cover"
+                    />
+                  )}
                 </hstack>
-                <text color={colors.text} size="xsmall">
-                  mine
-                </text>
-                <text color={colors.text} size="xsmall">
-                  reports
-                </text>
               </vstack>
+              {voteIndex==index && (
+                    <image 
+                      url="redflag.png"
+                      imageWidth={20} 
+                      imageHeight={20} 
+                      resizeMode="cover"
+                    />
+                  )}
             </zstack>
           );
         }
@@ -332,13 +442,49 @@ Devvit.addCustomPostType({
     
     // Render the game status
     const renderStatus = () => {
-      if (gameOver) {
-        return <text alignment="center" color={colors.text} weight="bold">Game Over! You hit a mine.</text>;
-      } else if (gameWon) {
-        return <text alignment="center" color={colors.text} weight="bold">You Win! All safe tiles revealed.</text>;
-      } else {
-        return <text alignment="center" color={colors.text} weight="bold">Score: {score}</text>;
-      }
+
+        return (
+          <hstack alignment="center middle" width="100%" height="12%" backgroundColor={gameWon?"darkgreen":'#303030'} cornerRadius='small' gap='none' borderColor='transparent' >
+
+          <vstack height="90%" width="80%" cornerRadius='none' gap='none' >
+            <spacer></spacer>
+              <text color={colors.text} weight="bold" size='large' alignment='center middle' grow={false}>
+                {gameOver ? "You lost 😔" : (gameWon ? "You Won🏆!" : "Avoid the mine!")}
+              </text>
+            
+            <text color={colors.text} weight="bold" size='xsmall' alignment='center middle' grow={false} >
+              {
+              (!gameOver && !gameWon) ?
+              "Each cell shows #mine reports"
+              :
+              voteIndex === gameData.minePosition 
+                ? "Join the angels 👼\n"
+                : (voteIndex === -1 
+                  ? "Place your mine flag!"
+                  : "Join the devils 😈 \n"
+                )
+              }
+            </text>
+          </vstack>
+          <button 
+          onPress={()=>{
+            console.log('mounting');
+            mount();
+          }}
+          appearance="plain"
+          textColor={colors.buttonText}
+          size='medium'
+          grow={false}
+          width={10}
+          maxWidth={10}
+          icon='help'
+        >
+            
+        </button>
+        </hstack>
+
+        );
+      
     };
   
     // For non-logged in users, show a message
@@ -350,33 +496,41 @@ Devvit.addCustomPostType({
       );
     }
   
+
+
     return (
-      <vstack height="100%" width="100%" gap="medium" alignment="center middle" backgroundColor={colors.background}>
-        <vstack gap="large">
-          {renderStatus()}
-          <vstack height="80%" width="100%" gap="medium">
-            {renderGrid()}
-          </vstack>
-          <hstack gap="medium">
-            {(gameOver || gameWon) && 
-              <button 
-                onPress={promptDevilOrAngel}
+      <zstack height="100%" width="100%">
+        {/* Background image */}
+        <image
+          url="tile_background.png"
+          imageWidth={1200}  // Set this to your image's actual width
+          imageHeight={800}  // Set this to your image's actual height
+          width="100%"
+          height="100%"
+          resizeMode="cover"
+          
+        />
+        
+        {/* Content layer */}
+        <vstack height="100%" width="100%" gap="medium" alignment="center middle" >
+          <vstack gap="large" backgroundColor='transparent' cornerRadius='small' height="100%" >
+            <hstack gap="small" width="100%" height="2%"></hstack>
+            {renderStatus()}
+            <vstack height="60%" width="100%" gap="small" alignment='center middle' backgroundColor='transparent'>
+              {renderGrid()}
+            </vstack>
+            {(gameOver || gameWon) && (
+                <button 
                 appearance="primary"
-                textColor={colors.buttonText}
-              >
-                Play Again
+                textColor="white"
+                onPress={saveAndShowLeaderboard}>
+                Confirm
               </button>
-            }
-            <button 
-              onPress={toggleTheme}
-              appearance="primary"
-              textColor={colors.buttonText}
-            >
-              Switch to {theme === "dark" ? "Light" : "Dark"} Theme
-            </button>
-          </hstack>
+                  )}
+              
+          </vstack>
         </vstack>
-      </vstack>
+      </zstack>
     );
   }
 });
