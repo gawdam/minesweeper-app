@@ -11,7 +11,7 @@ export const createForm = Devvit.createForm(
         name: 'title',
         label: 'Post Title',
         type: 'string',
-        defaultValue: "Mine Land : Edition 1",
+        defaultValue: "Angels Vs Devils : Edition 1",
         required: true,
         helpText: `What do you want your post title to be?`,
       },

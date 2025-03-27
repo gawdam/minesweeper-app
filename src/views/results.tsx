@@ -1,4 +1,4 @@
-import { Devvit, useState } from '@devvit/public-api';
+import { Devvit, useState, useWebView } from '@devvit/public-api';
 
 export const ResultsPage: Devvit.BlockComponent = ({
     angelCount,
@@ -6,7 +6,76 @@ export const ResultsPage: Devvit.BlockComponent = ({
     devilCount,
     devilScore,
     userFaction,
-}, { postId, redis }) => {
+    tileVotes, 
+    minePosition,   
+}, { postId, redis, reddit }) => {
+    
+    const renderGrid = () => {
+        const size=3;
+        const rows = [];
+        for (let i = 0; i < size; i++) {
+          const tiles = [];
+          
+          for (let j = 0; j < size; j++) {
+            const index = i * size + j;
+            
+            
+            tiles.push(
+              <zstack 
+                key={`tile-${index}`}
+                width="50px" 
+                height="50px"
+                alignment="center middle"
+                cornerRadius='small'
+              >
+                {/* Colored overlay */}
+                <hstack 
+                  width="100%" 
+                  height="100%" 
+                  alignment="center middle"
+                  backgroundColor='grey'
+                />
+                
+                {/* Content */}
+                <vstack alignment="center" cornerRadius='small'>
+                  {/* Always show vote count */}
+                  <hstack alignment="center middle" gap="small">
+                    <text color={colors.text} weight="bold" size="xlarge">
+                      {tileVotes[index]}
+                    </text>
+                    {index!=minePosition &&(
+                      <image 
+                        url="redflag.png"
+                        imageWidth={20} 
+                        imageHeight={20} 
+                        resizeMode="cover"
+                      />
+                    )}
+
+                    {index===minePosition && (
+                    <image 
+                      url="bomb.png"
+                      imageWidth={20} 
+                      imageHeight={20} 
+                      resizeMode="cover"
+                    />
+                  )}
+                  </hstack>
+                </vstack>
+
+              </zstack>
+            );
+          }
+          
+          rows.push(
+            <hstack key={`row-${i}`} gap='small'>
+              {tiles}
+            </hstack>
+          );
+        }
+        
+        return rows;
+      };
     // Determine the leading team
     const isAngelLead = angelScore! > devilScore!;
 
@@ -30,8 +99,16 @@ export const ResultsPage: Devvit.BlockComponent = ({
         text: "#E0E0E0"
     };
 
+        const { mount } = useWebView({
+          url: 'scoring.html',
+          onMessage: (message) => {
+            console.log(`Received message: ${message}`);
+          }
+        });
+
+    
     // Determine personalized message based on user's faction and game outcome
-    const getPersonalizedMessage = () => {
+    const userTeamIndicator = () => {
 
         if (userFaction === 'angel') {
             return "Your team: Angels 👼";
@@ -59,7 +136,7 @@ export const ResultsPage: Devvit.BlockComponent = ({
                     backgroundColor="#1E1E1E" 
                     cornerRadius="large" 
                     alignment="center middle"
-                    gap="large"
+                    gap="small"
                     padding="large"
                 >
                     {/* Title */}
@@ -87,7 +164,7 @@ export const ResultsPage: Devvit.BlockComponent = ({
                     {/* Scores Breakdown */}
                     <hstack 
                         width="100%" 
-                        height="200px" 
+                        height="150px" 
                         gap="medium" 
                         alignment="center middle"
                     >
@@ -198,19 +275,50 @@ export const ResultsPage: Devvit.BlockComponent = ({
                         alignment="center middle" 
                         gap="small"
                     >
+                        {renderGrid()}
                         <text 
                             color={colors.text}
                             size="medium" 
                             weight="bold"
                             alignment="center"
                         >
-                            {getPersonalizedMessage()}
+                            {userTeamIndicator()}
                         </text>
                     </vstack>
+
+                    <hstack 
+                        height="10%" 
+                        width="100%" 
+                        gap="small" 
+                        alignment="center middle"
+                    >
+                        <text 
+                            color={colors.text}
+                            size="xsmall"  // Made text smaller
+                            weight="regular"  // Lighter font weight
+                        >
+                            Scoring System
+                        </text>
+                        <button 
+                            onPress={()=>{
+                                console.log('mounting');
+                                mount();
+                            }}
+                            appearance="plain"
+                            textColor="white"
+                            size='small'  // Reduced button size
+                            grow={false}
+                            width={5}
+                            maxWidth={5}
+                            icon='help'
+                        />
+                    </hstack>
                 </vstack>
             </hstack>
         </zstack>
     );
 };
+
+
 
 export default ResultsPage;

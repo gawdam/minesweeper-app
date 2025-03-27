@@ -52,7 +52,7 @@ Devvit.addCustomPostType({
   name: 'Experience Post',
   height: 'tall',
   
-  render: ({redis, postId, userId, ui, assets}) => {
+  render: ({redis, postId, userId, ui, assets, reddit}) => {
 
 
     const { mount } = useWebView({
@@ -116,7 +116,10 @@ Devvit.addCustomPostType({
     
     // Create states from game data
     const [tileStates, setTileStates] = useState(gameData ? gameData.tileStates : []);
-    const [tileVotes, setTileVotes] = useState(gameData ? gameData.tileVotes : [])
+    const [tileVotes, setTileVotes] = useState(async () => {
+      const voteCounts = await redis.get(GameVotesKey).then((value) => value ? JSON.parse(value) : Array(3 * 3).fill(0));
+      return voteCounts;
+    })
     const [userFaction, setUserFaction] = useState(gameData ? gameData.userFaction : '-');
     const [gameOver, setGameOver] = useState(false);
     const [gameWon, setGameWon] = useState(false);
@@ -194,6 +197,9 @@ Devvit.addCustomPostType({
      devilCount={devilCount}
      devilScore={devilScore}
      userFaction={userFaction}
+     tileVotes={tileVotes}
+     minePosition={gameData.minePosition}
+     
    />; 
     }
     // Theme colors
@@ -321,7 +327,31 @@ Devvit.addCustomPostType({
     }
     
 
-
+    const addComment = async (userScore: number, userContributionFaction:string ,userfaction:string) => {
+      try {
+        
+        // Get the current user
+        const currentUser = await reddit.getCurrentUser();
+        let username = currentUser?.username;
+    
+        if (username) {
+  
+          username = `u/${username}`
+  
+          // Get the current post
+          const post = await reddit.getPostById(postId!);
+          await post.addComment({
+              text: `${username} joined the ${userfaction} & contributed ${userScore} points to the ${userContributionFaction}!`,
+            });
+    
+          console.log(`Comment added for user ${username}`);
+        } else {
+          console.error('Unable to retrieve username');
+        }
+      } catch (error) {
+        console.error('Error adding comment:', error);
+      }
+    };
 const saveAndShowLeaderboard = async () => {
   tileVotes[voteIndex] += 1;
 
@@ -330,22 +360,30 @@ const saveAndShowLeaderboard = async () => {
     const newDevilScore = devilScore + (gameWon ? 0 : 2);
     const newAngelCount = angelCount + 1;
 
+    addComment((gameWon ? 5 : 2), (gameWon ? "angels" : 'devils'), 'angels');
+
+
     await updateAngelScore(newAngelScore);
     await updateAngelCount(newAngelCount);
     await updateDevilScore(newDevilScore);
     
     setUserFaction('angel');
+    saveGameState(tileStates, tileVotes, 'angel', gameOver, gameWon, true, angelCount, angelScore, devilCount, devilScore);
+
   } else {
     const newDevilScore = devilScore + (gameWon ? 5 : 2);
     const newDevilCount = devilCount + 1;
+
+    addComment((gameWon ? 5 : 2),'devils', 'devils');
 
     await updateDevilScore(newDevilScore);
     await updateDevilCount(newDevilCount);
     
     setUserFaction('devil');
+    saveGameState(tileStates, tileVotes, 'devil', gameOver, gameWon, true, angelCount, angelScore, devilCount, devilScore);
+
   }
 
-  saveGameState(tileStates, tileVotes, userFaction, gameOver, gameWon, true, angelCount, angelScore, devilCount, devilScore);
   await redis.set(GameVotesKey, JSON.stringify(tileVotes));
   setHasVoted(true);
 };
@@ -523,7 +561,9 @@ const saveAndShowLeaderboard = async () => {
                 <button 
                 appearance="primary"
                 textColor="white"
-                onPress={saveAndShowLeaderboard}>
+                onPress={saveAndShowLeaderboard}
+                disabled={voteIndex === -1}>
+                  
                 Confirm
               </button>
                   )}

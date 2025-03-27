@@ -35,7 +35,7 @@
     text-align: center;
     font-size: 1.3rem;
     margin: 0 0 8px 0;
-    color: #646cff;
+    color: #4AB3FF;
   }
   
   .steps-container {
@@ -54,7 +54,7 @@
   }
   
   .step h3 {
-    color: #646cff;
+    color: #4AB3FF;
     margin: 0 0 6px 0;
     font-size: 0.95rem;
   }
@@ -166,5 +166,5 @@
 
 .vs {
   font-weight: bold;
-  color: #646cff;
+  color: #4AB3FF;
 }
